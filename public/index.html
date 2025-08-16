@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MiniGolf — Daily</title>
+  <h2 id="levelname"></h2>
+  <style>
+    html,body{margin:0;height:100%;background:#0b0f12;color:#e7ecef;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    .wrap{display:flex;flex-direction:column;align-items:center;gap:.5rem;padding:1rem}
+    canvas{background:#0a3a1a;border:2px solid #0e2213;border-radius:12px;touch-action:none}
+    .hud{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;justify-content:center}
+    .btn, input[type=text]{appearance:none;border:1px solid #2a2f33;background:#13181c;color:#e7ecef;border-radius:10px;padding:.5rem .75rem}
+    .btn{cursor:pointer}
+    .board{width:min(720px,95vw);background:#101316;border:1px solid #232a2f;border-radius:12px;padding:.5rem .75rem}
+    table{width:100%;border-collapse:collapse;font-size:.95rem}
+    th,td{padding:.35rem;border-bottom:1px dashed #1f252a;text-align:left}
+    th{opacity:.8}
+    .hint{opacity:.7;font-size:.9rem}
+    .height32{height:32px}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1 style="margin:.25rem 0">MiniGolf — Daily</h1>
+  <div class="hud">
+    <span id="date"></span>
+    <span>Strokes: <b id="strokes">0</b></span>
+    <span>Time: <b id="time">0.0s</b></span>
+    <input id="name" type="text" size="10" maxlength="12" placeholder="name"/>
+    <button id="reset" class="btn">Reset</button>
+    <input type="checkbox" id="mute" hidden />
+    <label for="mute" id="mute-label" class="height32">
+      <img id="mute-icon" src="audio.png" alt="Audio On" width="32" height="32" style="background-color: white;border-radius: 8px;">
+    </label>
+  </div>
+  <canvas id="g" width="800" height="480"></canvas>
+  <div class="hint">Drag to aim, release to hit. Same hole for everyone today.</div>
+
+  <div class="board">
+    <b>Today's Leaderboard</b>
+    <div id="status" class="hint" style="margin:.25rem 0 .5rem"></div>
+    <table>
+      <thead><tr><th>#</th><th>Name</th><th>Strokes</th><th>Time</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+<script>
+(function(){
+  // ====== Config ====== 
+  const TILE_SIZE = 16;
+
+  const base_URL = "https://villekokkarinen.github.io";
+
+  const SUPABASE_URL = 'https://unctnllexvziysrvjhvu.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVuY3RubGxleHZ6aXlzcnZqaHZ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUyNzU0MjEsImV4cCI6MjA3MDg1MTQyMX0.0CkYo3_kW48F1J4-oR95QryZXa28chiEcysWnJQB2qA';
+  const supabaseclient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const GRID_W = 50, GRID_H = 30;
+
+  const WIDTH=GRID_W*TILE_SIZE, HEIGHT=GRID_H*TILE_SIZE, HOLE_R=TILE_SIZE/2, BALL_R=TILE_SIZE/2, FRICTION=0.986, STOP=0.04, MAX_POWER=12;
+
+  const MAX_DRAG_PX = TILE_SIZE * MAX_POWER; // matches your old scale
+
+    // ====== Physics & collision ======
+  const canvas=document.getElementById('g'), ctx=canvas.getContext('2d');
+  let spawn = { x: 0, y: 0 };
+  let hole = { x: 0, y: 0 };
+  let ball={x:spawn.x,y:spawn.y,vx:0,vy:0}, aiming=false, start=null, strokes=0, startedAt=null, finished=false, finalTime=null;
+  let aimMode = 0; // 0 = normal, 1 = right 90°, 2 = left 90°, 3 = backward
+  const strokesEl=document.getElementById('strokes'), timeEl=document.getElementById('time');
+
+  const TILE_MATERIALS = {
+    empty: 0,
+    wall: 1,
+    sand: 2,
+    mud: 3,
+    water: 4,
+    spawn: 5,
+    hole: 6
+  };
+
+  let grid = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(TILE_MATERIALS.empty));
+
+  const getAsset = function(name){
+    return `${base_URL}/assets/${name}`;
+  }
+
+  var hit_audio = new Audio(getAsset('hit.mp3'));
+  var illegal_audio = new Audio(getAsset('illegal.mp3'));
+
+  let muted = false;
+
+  const materials = [
+    "wall",
+    "water",
+    "sand",
+    "mud",
+    "stone"
+  ]
+
+  const frictionModifiers = {
+    sand: 0.925,
+    mud: 0.75,
+    stone: 0.989
+  };
+
+  const tileImages = {};
+  const tilePatterns = {};
+
+  const totalMaterials = materials.length;
+
+  materials.forEach(mat => {
+    const img = new Image();
+    img.src = getAsset(`${mat}.png`);
+    tileImages[mat] = img;
+    img.onload = () => {
+      tilePatterns[mat] = ctx.createPattern(tileImages[mat], 'repeat');      
+    };
+  });
+
+  // ====== Utilities ======
+  const todayStr = new Date().toISOString().slice(0,10);
+  document.getElementById('date').textContent = todayStr;
+
+  function decodeLevel(encoded) {
+    let flat = [];
+    for (let [val, count] of encoded) {
+      flat.push(...Array(count).fill(val));
+    }
+    let idx = 0;
+    for (let y = 0; y < GRID_H; y++) {
+      for (let x = 0; x < GRID_W; x++) {
+        grid[y][x] = flat[idx++];
+      }
+    }
+  }
+
+  async function loadLevel(levelName) {
+    console.log(levelName);
+    const res = await fetch(`${base_URL}/levels/${levelName}.json`);
+    if (!res.ok) throw new Error("Level not found");
+    const levelData = await res.json();
+    return levelData;
+  }
+
+  async function getLeaderboard() {
+    const { data, error } = await supabaseclient
+      .from('leaderboard')
+      .select('*')
+      .order('score', { ascending: true })  // lowest score first
+      .order('time', { ascending: true }) // then by time taken
+      .eq('level', todayStr)
+      .limit(5);
+    if (error) console.error(error);
+    return data;
+  }
+
+  function importLevel() {
+    loadLevel(todayStr).then((data) => {
+      decodeLevel(data.level);
+
+      const spawn = {x: 0, y: 0};
+      const hole = {x: 0, y: 0};
+      const obstacles = [];
+
+      for (let y = 0; y < GRID_H; y++) {
+        for (let x = 0; x < GRID_W; x++) {
+          if (grid[y][x] === TILE_MATERIALS.spawn) {
+            spawn.x = x * TILE_SIZE;
+            spawn.y = y * TILE_SIZE;
+          } else if (grid[y][x] === TILE_MATERIALS.hole) {
+            hole.x = x * TILE_SIZE;
+            hole.y = y * TILE_SIZE;
+          } else if (grid[y][x] !== TILE_MATERIALS.empty) {
+            var material = Object.keys(TILE_MATERIALS).find(key => TILE_MATERIALS[key] === grid[y][x]);
+            obstacles.push({ x: x*TILE_SIZE, y: y*TILE_SIZE, w:16, h:16, material: material });
+          }
+        }
+      }
+
+      initializeGame(spawn, hole, obstacles);
+
+    }).catch(err => {
+      console.error("Error loading level:", err);
+    });
+  }
+
+  importLevel();
+
+  let walls = [];
+  let floors = [];  
+
+  function addWall(x, y, w, h, material) {
+    walls.push({ x, y, w, h, material });
+  }
+
+  function addFloor(x, y, w, h, material) {
+    floors.push({ x, y, w, h, material });
+  }
+
+  function alignHoleAndBall(hole, ball) {
+    hole.x += HOLE_R;
+    hole.y += HOLE_R;
+    ball.x += BALL_R;
+    ball.y += BALL_R;
+  }
+
+  function initializeGame(s, h, obstacles){
+    ball.x = s.x;
+    ball.y = s.y;
+    ball.vx = 0;
+    ball.vy = 0;
+
+    spawn = s;
+    hole = h;
+
+    alignHoleAndBall(hole, ball);
+
+    aiming = false;
+    start = null;
+    strokes = 0;
+    startedAt = null;
+    finished = false;
+    finalTime = null;
+
+    walls = [];
+    floors = [];
+
+    obstacles.forEach(o => {
+      if (o.material === 'wall') {
+        addWall(o.x, o.y, o.w, o.h, o.material);
+      } else {
+        addFloor(o.x, o.y, o.w, o.h, o.material);
+      }
+    });
+  }
+
+
+  function computePower(dx, dy) {
+    const dist = Math.hypot(dx, dy);
+    if (dist <= TILE_SIZE) return { power: 0, pct: 0 };
+    const adj = dist - TILE_SIZE;
+    const pct = Math.min(1, adj / (MAX_DRAG_PX - TILE_SIZE));
+    return { power: pct * MAX_POWER, pct };
+  }
+
+  function getMaterialAt(x, y) {   
+    // Check floors
+    for (const f of floors) {
+      if (x >= f.x && x < f.x + f.w && y >= f.y && y < f.y + f.h) {
+        return f.material;
+      }
+    }
+    return null;
+  }
+  
+  function rectCollideReflect(px, py, vx, vy, rect) {
+    const { x, y, w, h } = rect;
+
+    // Closest point on rect to ball
+    const cx = Math.max(x, Math.min(px, x + w));
+    const cy = Math.max(y, Math.min(py, y + h));
+
+    let dx = px - cx;
+    let dy = py - cy;
+    const distSq = dx * dx + dy * dy;
+
+    if (distSq < BALL_R * BALL_R && distSq > 0) {
+        const dist = Math.sqrt(distSq);
+        let nx = dx / dist;
+        let ny = dy / dist;
+
+        // Determine if we're colliding with a face or corner
+        const withinVert = py >= y && py <= y + h;
+        const withinHoriz = px >= x && px <= x + w;
+
+        if (withinVert && !withinHoriz) {
+            // Vertical wall face — force pure horizontal normal
+            nx = dx > 0 ? 1 : -1;
+            ny = 0;
+        } else if (withinHoriz && !withinVert) {
+            // Horizontal wall face — force pure vertical normal
+            nx = 0;
+            ny = dy > 0 ? 1 : -1;
+        }
+        // else: it's a corner — keep diagonal normal
+
+        // Push out of wall
+        const overlap = BALL_R - dist;
+        px += nx * overlap;
+        py += ny * overlap;
+
+        // Reflect velocity if moving into wall
+        const dot = vx * nx + vy * ny;
+        if (dot < 0) {
+            vx -= 2 * dot * nx;
+            vy -= 2 * dot * ny;
+            vx *= 0.8;
+            vy *= 0.8;
+        }
+    }
+
+    return { px, py, vx, vy };
+  }
+
+  function update(dt) {
+    if (finished) return;
+
+    const speed = Math.hypot(ball.vx, ball.vy);
+    const maxStep = BALL_R / 2;
+    const steps = Math.ceil(speed * dt / maxStep) || 1;
+    const subDt = dt / steps;
+
+    for (let i = 0; i < steps; i++) {
+      ball.x += ball.vx * subDt;
+      ball.y += ball.vy * subDt;
+
+      // Check collisions with walls
+      for (const rect of walls) {
+        const result = rectCollideReflect(ball.x, ball.y, ball.vx, ball.vy, rect);
+        ball.x = result.px;
+        ball.y = result.py;
+        ball.vx = result.vx;
+        ball.vy = result.vy;
+      }
+
+      // Water hazard check
+      if (getMaterialAt(ball.x, ball.y) === "water") {
+        ball.x = previousLocation.x;
+        ball.y = previousLocation.y;
+        ball.vx = ball.vy = 0;
+        if (!muted) {
+            illegal_audio.currentTime = 0;
+            illegal_audio.play();
+        }
+        return;
+      }
+    }
+
+    // Apply friction
+    const currentMaterial = getMaterialAt(ball.x, ball.y);
+    const friction = frictionModifiers[currentMaterial] || FRICTION;
+    ball.vx *= friction;
+    ball.vy *= friction;
+
+    // Stop ball if below velocity threshold
+    if (Math.abs(ball.vx) + Math.abs(ball.vy) < STOP) {
+        ball.vx = ball.vy = 0;
+    }
+
+    // Hole check
+    const dx = ball.x - hole.x;
+    const dy = ball.y - hole.y;
+    if (Math.hypot(dx, dy) < HOLE_R - 1 && Math.hypot(ball.vx, ball.vy) < 1.2 && strokes > 0) {
+      finished = true;
+      ball.vx = ball.vy = 0;
+      ball.x = hole.x;
+      ball.y = hole.y;
+      submitScore();
+      finalTime = (performance.now() - startedAt) / 1000;
+    }
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,WIDTH,HEIGHT);
+
+    ctx.fillStyle='#0a3a1a';
+    ctx.fillRect(0,0,WIDTH,HEIGHT);
+
+    for (const w of walls) {
+      ctx.fillStyle = tilePatterns[w.material] || '#ff00ff';
+      ctx.fillRect(w.x, w.y, w.w, w.h);
+    }
+
+    for (const f of floors) {
+      ctx.fillStyle = tilePatterns[f.material] || '#ff00ff';
+      ctx.fillRect(f.x, f.y, f.w, f.h);
+    }
+
+    ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R+2,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(ball.x,ball.y,BALL_R,0,Math.PI*2); ctx.fill();
+
+    // aim line
+    if (aiming) {
+      let dx = mouse.x - ball.x;
+      let dy = mouse.y - ball.y;
+      if (aimMode === 1) [dx, dy] = [ -dy, dx ];
+      else if (aimMode === 2) [dx, dy] = [ dy, -dx ];
+      else if (aimMode === 3) { dx = -dx; dy = -dy; }
+      
+      ctx.strokeStyle = '#e7ecef';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 5]);
+      ctx.beginPath();
+      ctx.moveTo(ball.x, ball.y);
+      ctx.lineTo(ball.x + dx, ball.y + dy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Power meter
+      const barW = 60, barH = 8;
+      ctx.strokeStyle = '#fff';
+      ctx.strokeRect(ball.x - barW/2, ball.y - BALL_R - 15, barW, barH);
+
+      const { pct } = computePower(dx, dy);
+
+      // Ensure a minimum visual indicator when > 0
+      let visualPct = pct > 0 ? Math.max(0.1, pct) : 0;
+
+      let r, g, b = 0;
+
+      if (visualPct <= 0) {
+        ctx.fillStyle = '#555'; // dim if zero
+      } else if (visualPct <= 0.5) {
+        // Green to Yellow
+        const t = visualPct / 0.5;
+        r = Math.floor(255 * t);
+        g = 255;
+      } else {
+        // Yellow to Red
+        const t = (visualPct - 0.5) / 0.5;
+        r = 255;
+        g = Math.floor(255 * (1 - t));
+      }
+
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+
+      // Draw the power bar
+      ctx.fillRect(
+        ball.x - barW / 2,
+        ball.y - BALL_R - 15,
+        barW * visualPct,
+        barH
+      );
+    }
+  }
+
+  // ====== Input ======
+  const mouse={x:0,y:0};
+
+  const previousLocation={x:0,y:0};
+
+  function getPos(e){const r=canvas.getBoundingClientRect(); const p=(e.touches?e.touches[0]:e); return {x:(p.clientX-r.left)*canvas.width/r.width,y:(p.clientY-r.top)*canvas.height/r.height};}
+  
+  canvas.addEventListener('pointermove',e=>{const p=getPos(e); mouse.x=p.x; mouse.y=p.y;});
+
+  canvas.addEventListener('pointerup', e => {
+    if (!aiming) return;
+    let dx = mouse.x - ball.x;
+    let dy = mouse.y - ball.y;
+
+    // Rotate aim vector according to aimMode
+    if (aimMode === 1) [dx, dy] = [ -dy, dx ];
+    else if (aimMode === 2) [dx, dy] = [ dy, -dx ];
+    else if (aimMode === 3) { dx = -dx; dy = -dy; }
+
+    const { power, pct } = computePower(dx, dy);
+    if (power === 0) { // cancel shot
+      aiming = false;
+      aimMode = 0;
+      return;
+    }
+
+    if (!muted) {
+      hit_audio.currentTime = 0;
+      hit_audio.play();
+    }
+
+    previousLocation.x = ball.x;
+    previousLocation.y = ball.y;
+
+    const a = Math.atan2(dy, dx);
+    ball.vx = Math.cos(a) * power;
+    ball.vy = Math.sin(a) * power;
+
+    aiming = false;
+    aimMode = 0;
+    strokes++;
+    strokesEl.textContent = strokes;
+    if (!startedAt) startedAt = performance.now();
+  });
+
+  canvas.addEventListener('contextmenu', e => {
+    e.preventDefault(); // prevent context menu (right-click)
+    aimMode = (aimMode + 1) % 4;
+  });
+
+  canvas.addEventListener('pointerdown', e => {
+    if (finished) return;
+    if (ball.vx || ball.vy) return;
+    aiming = true;
+    const p = getPos(e);
+    mouse.x = p.x;
+    mouse.y = p.y;
+  });
+
+  // ====== Loop ======
+  let last=performance.now();
+  function tick(now){
+    const dt=(now-last)/16;
+    last=now;
+    if (startedAt) {
+      if (finished && finalTime != null) {
+        timeEl.textContent = finalTime.toFixed(1) + 's';
+      } else {
+        timeEl.textContent = ((now - startedAt) / 1000).toFixed(1) + 's';
+      }
+    }
+    update(dt);
+    draw();
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // ====== Reset ======
+  document.getElementById('reset').onclick=()=>{ball={x:spawn.x,y:spawn.y,vx:0,vy:0}; strokes=0; startedAt=null; finished=false; strokesEl.textContent='0'; timeEl.textContent='0.0s';};
+
+  const muteCheckbox = document.getElementById("mute");
+  const muteIcon = document.getElementById("mute-icon");
+
+  muteIcon.src = getAsset("audio.png");
+
+  muteCheckbox.addEventListener("change", () => {
+    if (muteCheckbox.checked) {
+      muteIcon.src = getAsset("mute.png");
+      muteIcon.alt = "Muted";
+      muted = true;
+    } else {
+      muteIcon.src = getAsset("audio.png");
+      muteIcon.alt = "Audio On";
+      muted = false;
+    }
+  });
+
+  // ====== Leaderboard ======
+  const statusEl=document.getElementById('status'), rowsEl=document.getElementById('rows');
+  const pid = (localStorage.pid ||= Math.random().toString(36).slice(2));
+
+  async function fetchBoard(){ try{
+    statusEl.textContent='loading…';
+    const data = await getLeaderboard();
+    statusEl.textContent = `Top ${data.length||0}`;
+    renderRows(data);
+  }catch(e){statusEl.textContent='(offline leaderboard)';}}
+
+  function renderRows(list){
+    rowsEl.innerHTML='';
+    (list||[]).forEach((s,i)=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${i+1}</td><td>${escapeHtml(s.player_name)}</td><td>${s.score}</td><td>${(s.time).toFixed(1)}s</td>`;
+      rowsEl.appendChild(tr);
+    });
+  }
+  function escapeHtml(s){return (s+"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
+
+  async function submitScore(){
+    try{
+      const player_name=(document.getElementById('name').value||'anon').slice(0,12);
+      const time_ms = Math.round((performance.now()-startedAt)||0);
+      const time = Math.round(time_ms / 1000 * 10) / 10; // round to 1 decimal place
+      const score = Number(strokes);
+      const level = todayStr;
+      const timestamp = new Date().toISOString();
+
+      if(score <= 0 || time <= 0){
+        alert('Invalid score or time. Please play the game first.');
+        return;
+      }
+      
+      const { data, error } = await supabaseclient
+      .from('leaderboard')
+      .insert([{ player_name, time, score, level, timestamp }]);
+
+      if (error) {
+        console.error('Error submitting score:', error.message);
+        alert('Failed to submit score. Try again.');
+        return;
+      }
+
+      fetchBoard();
+
+    }catch(e){ statusEl.textContent='submit failed (playing locally)'; }
+  }
+
+  fetchBoard();
+
+})();
+</script>
+</body>
+</html>
