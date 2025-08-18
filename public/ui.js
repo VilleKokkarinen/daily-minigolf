@@ -1,12 +1,11 @@
-// ui.js
-import { WIDTH, HEIGHT, HOLE_R, BALL_R } from './config.js';
+import { HOLE_R, BALL_R, TILE_SIZE } from './config.js';
 import { resetGame } from './game.js';
 import { getAsset } from './assets.js';
 import { muteSwitch } from './game.js';
 import { getLeaderboard } from './supabase.js';
 import { tilePatterns } from './assets.js';
 import { mouse } from './input.js';
-import { walls, floors, hole, ball, aiming, aimMode, strokes, setAimMode } from './game.js';
+import { walls, floors, hole, ball, aiming, aimMode, strokes, setAimMode, spawn } from './game.js';
 import { computePower } from './physics.js';
 
 export const canvas = document.getElementById('g');
@@ -94,76 +93,76 @@ function renderLeaderBoardRows(list){
 function escapeHtml(s){return (s+"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
 
 export function draw(){
-    ctx.clearRect(0,0,WIDTH,HEIGHT);
-
-    ctx.fillStyle='#0f4622ff';
-    ctx.fillRect(0,0,WIDTH,HEIGHT);
-
-    for (const w of walls) {
-      ctx.fillStyle = tilePatterns[w.material] || '#ff00ff';
-      ctx.fillRect(w.x, w.y, w.w, w.h);
-    }
-
-    for (const f of floors) {
-      ctx.fillStyle = tilePatterns[f.material] || '#ff00ff';
-      ctx.fillRect(f.x, f.y, f.w, f.h);
-    }
-
-    ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R+2,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(ball.x,ball.y,BALL_R,0,Math.PI*2); ctx.fill();
-
-    // aim line
-    if (aiming) {
-      let dx = mouse.x - ball.x;
-      let dy = mouse.y - ball.y;
-      if (aimMode === 1) [dx, dy] = [ -dy, dx ];
-      else if (aimMode === 2) [dx, dy] = [ dy, -dx ];
-      else if (aimMode === 3) { dx = -dx; dy = -dy; }
-      
-      ctx.strokeStyle = '#e7ecef';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 5]);
-      ctx.beginPath();
-      ctx.moveTo(ball.x, ball.y);
-      ctx.lineTo(ball.x + dx, ball.y + dy);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Power meter
-      const barW = 60, barH = 8;
-      ctx.strokeStyle = '#fff';
-      ctx.strokeRect(ball.x - barW/2, ball.y - BALL_R - 15, barW, barH);
-
-      const { pct } = computePower(dx, dy);
-
-      // Ensure a minimum visual indicator when > 0
-      let visualPct = pct > 0 ? Math.max(0.1, pct) : 0;
-
-      let r, g, b = 0;
-
-      if (visualPct <= 0) {
-        ctx.fillStyle = '#555'; // dim if zero
-      } else if (visualPct <= 0.5) {
-        // Green to Yellow
-        const t = visualPct / 0.5;
-        r = Math.floor(255 * t);
-        g = 255;
-      } else {
-        // Yellow to Red
-        const t = (visualPct - 0.5) / 0.5;
-        r = 255;
-        g = Math.floor(255 * (1 - t));
-      }
-
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
-
-      // Draw the power bar
-      ctx.fillRect(
-        ball.x - barW / 2,
-        ball.y - BALL_R - 15,
-        barW * visualPct,
-        barH
-      );
-    }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (const w of walls) {
+    ctx.fillStyle = tilePatterns[w.material] || '#ff00ff';
+    ctx.fillRect(w.x, w.y, w.w, w.h);
   }
+
+  for (const f of floors) {
+    ctx.fillStyle = tilePatterns[f.material] || '#ff00ff';
+    ctx.fillRect(f.x, f.y, f.w, f.h);
+  }
+
+  ctx.fillStyle = tilePatterns.grass || '#ff00ff';
+  ctx.fillRect(spawn.x, spawn.y, TILE_SIZE, TILE_SIZE);
+  ctx.fillRect(hole.x-TILE_SIZE/2, hole.y-TILE_SIZE/2, TILE_SIZE, TILE_SIZE); // adjusted position, as hole pos is centered
+
+  ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R+2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(ball.x,ball.y,BALL_R,0,Math.PI*2); ctx.fill();
+
+  // aim line
+  if (aiming) {
+    let dx = mouse.x - ball.x;
+    let dy = mouse.y - ball.y;
+    if (aimMode === 1) [dx, dy] = [ -dy, dx ];
+    else if (aimMode === 2) [dx, dy] = [ dy, -dx ];
+    else if (aimMode === 3) { dx = -dx; dy = -dy; }
+    
+    ctx.strokeStyle = '#e7ecef';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 5]);
+    ctx.beginPath();
+    ctx.moveTo(ball.x, ball.y);
+    ctx.lineTo(ball.x + dx, ball.y + dy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Power meter
+    const barW = 60, barH = 8;
+    ctx.strokeStyle = '#fff';
+    ctx.strokeRect(ball.x - barW/2, ball.y - BALL_R - 15, barW, barH);
+
+    const { pct } = computePower(dx, dy);
+
+    // Ensure a minimum visual indicator when > 0
+    let visualPct = pct > 0 ? Math.max(0.1, pct) : 0;
+
+    let r, g, b = 0;
+
+    if (visualPct <= 0) {
+      ctx.fillStyle = '#555'; // dim if zero
+    } else if (visualPct <= 0.5) {
+      // Green to Yellow
+      const t = visualPct / 0.5;
+      r = Math.floor(255 * t);
+      g = 255;
+    } else {
+      // Yellow to Red
+      const t = (visualPct - 0.5) / 0.5;
+      r = 255;
+      g = Math.floor(255 * (1 - t));
+    }
+
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+
+    // Draw the power bar
+    ctx.fillRect(
+      ball.x - barW / 2,
+      ball.y - BALL_R - 15,
+      barW * visualPct,
+      barH
+    );
+  }
+}

@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Daily - MiniGolf</title>
+  <title>Putt Of The Day</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico"/>
   <style>
     html,body{margin:0;height:100%;background:#0b0f12;color:#e7ecef;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
     .wrap{display:flex;flex-direction:column;align-items:center;gap:.5rem;padding:1rem}
@@ -19,37 +20,45 @@
     .height32{height:32px}
   </style>
 </head>
-<body>
-<div class="wrap">
-  <h1 style="margin:.25rem 0">Daily - MiniGolf</h1>
-  <h2 style="margin:.25rem 0" id="levelname">Loading level...</h2>
-  <div class="hud">
-    <span id="date"></span>
-    <span>Strokes: <b id="strokes">0</b></span>
-    <span>Time: <b id="time">0.0s</b></span>
-    <input id="name" type="text" size="10" maxlength="12" placeholder="name"/>
-    <button id="reset" class="btn">Reset</button>
-    <input type="checkbox" id="mute" hidden />
-    <label for="mute" id="mute-label" class="height32">
-      <img id="mute-icon" width="32" height="32" style="background-color: white;border-radius: 8px;">
-    </label>
-    <label for="aim" id="aim-label" class="height32">
-      <img id="aim-icon" width="32" height="32" style="background-color: white;border-radius: 8px;">
-    </label>
-  </div>
-  <canvas id="g" width="800" height="480"></canvas>
-  <div class="hint">Drag to aim, release to hit. r-click to switch aim angle. Same hole for everyone today.</div>
+  <body>
+    <div class="wrap">
+      <h1 style="margin:.25rem 0">Putt Of The Day</h1>
+      <h2 style="margin:.25rem 0" id="levelname">Loading level...</h2>
+      <div class="hud">
+        <span id="date"></span>
+        <span>Strokes: <b id="strokes">0</b></span>
+        <span>Time: <b id="time">0.0s</b></span>
+        <input id="name" type="text" size="10" maxlength="12" placeholder="name"/>
+        <button id="reset" class="btn">Reset</button>
+        <input type="checkbox" id="mute" hidden />
+        <label for="mute" id="mute-label" class="height32">
+          <img id="mute-icon" width="32" height="32" style="background-color: white;border-radius: 8px;">
+        </label>
+        <label for="aim" id="aim-label" class="height32">
+          <img id="aim-icon" width="32" height="32" style="background-color: white;border-radius: 8px;">
+        </label>
+      </div>
+      <canvas id="g"></canvas>
+      <div class="hint">Drag to aim, release to hit. r-click to switch aim angle. Same hole for everyone today.</div>
 
-  <div class="board">
-    <b>Today's Leaderboard</b>
-    <div id="status" class="hint" style="margin:.25rem 0 .5rem"></div>
-    <table>
-      <thead><tr><th>#</th><th>Name</th><th>Strokes</th><th>Time</th></tr></thead>
-      <tbody id="rows"></tbody>
-    </table>
-  </div>
-</div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
-<script type="module" src="./main.js"></script>
-</body>
+      <div class="board">
+        <b>Today's Leaderboard</b>
+        <div id="status" class="hint" style="margin:.25rem 0 .5rem"></div>
+        <table>
+          <thead><tr><th>#</th><th>Name</th><th>Strokes</th><th>Time</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script type="module">
+    import { TILE_SIZE, GRID_W, GRID_H } from './config.js';
+
+    const canvas = document.getElementById('g');
+    canvas.width = TILE_SIZE * GRID_W;
+    canvas.height = TILE_SIZE * GRID_H;
+  </script>
+  <script type="module" src="./main.js"></script>
+
+  </body>
 </html>

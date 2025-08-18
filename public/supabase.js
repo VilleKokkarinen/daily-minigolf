@@ -1,43 +1,60 @@
-// supabase.js
 import { SUPABASE_URL, SUPABASE_ANON_KEY, todayStr } from './config.js';
 import { drawLeaderBoard } from './ui.js';
 
 export const supabaseclient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export async function getLeaderboard() {
-  const level = todayStr;
-    const { data, error } = await supabaseclient
-        .from('leaderboard')
-        .select('*')
-        .order('score', { ascending: true })
-        .order('time', { ascending: true })
-        .eq('level', level)
-        .limit(5);
-    if (error) console.error(error);
-    return data;
+  const { data, error } = await supabaseclient
+    .from('leaderboard')
+    .select('*')
+    .order('score', { ascending: true })
+    .order('time', { ascending: true })
+    .eq('day', todayStr)
+    .limit(5);
+  if (error) console.error(error);
+  return data;
 }
 
-export async function submitScore(player_name, time, score, level, timestamp){
-    try{
+export async function getDailyLevelId() {
+  const { data, error } = await supabaseclient
+    .from('daily_level')
+    .select('level_id')
+    .eq('day', todayStr)
+    .single();
+  if (error) console.error(error);
+  return data;
+}
 
-      if(score <= 0 || time <= 0){
-        alert('Invalid score or time. Please play the game first.');
-        return;
-      }
-      
-      const { data, error } = await supabaseclient
-      .from('leaderboard')
-      .insert([{ player_name, time, score, level, timestamp }]);
+export async function getDailyLevel(id) {
+  const { data, error } = await supabaseclient
+    .from('level')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) console.error(error);
+  return data;
+}
 
-      if (error) {
-        console.error('Error submitting score:', error.message);
-        alert('Failed to submit score. Try again.');
-        return;
-      }
+export async function submitScore(player_name, time, score, day, timestamp){
+  try{
+    if(score <= 0 || time <= 0){
+      alert('Invalid score or time. Please play the game first.');
+      return;
+    }
+    
+    const { data, error } = await supabaseclient
+    .from('leaderboard')
+    .insert([{ player_name, time, score, day, timestamp }]);
 
-      drawLeaderBoard();
+    if (error) {
+      console.error('Error submitting score:', error.message);
+      alert('Failed to submit score. Try again.');
+      return;
+    }
 
-    }catch(e){
-      updateStatusText('Failed to submit score. Playing locally?');
-     }
+    drawLeaderBoard();
+
+  }catch(e){
+    updateStatusText('Failed to submit score. Playing locally?');
   }
+}

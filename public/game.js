@@ -1,10 +1,9 @@
-// game.js
-
-import { BALL_R, FRICTION, STOP, HOLE_R, frictionModifiers, todayStr} from './config.js';
+import { WIDTH, HEIGHT, MAX_POWER, WALL_BOUNCE_POWER, BALL_R, FRICTION, STOP, HOLE_R, frictionModifiers, HILL_ACCELERATION, todayStr} from './config.js';
 import { updateStrokesText, updateTimeText, updateAimIcon} from './ui.js';
 import { submitScore } from './supabase.js';
 import { computePower } from "./physics.js";
 import { playAudio } from './audio.js';
+import { importLevel } from './level.js';
 
 export let ball = { x: 0, y: 0, vx: 0, vy: 0 };
 export let spawn = { x: 0, y: 0 };
@@ -57,11 +56,16 @@ function alignHoleAndBall(hole, ball) { // Align hole and ball to the center of 
 }
 
 export function resetGame(){
-  ball = { x: spawn.x, y: spawn.y, vx: 0, vy: 0 };
+  importLevel();
+}
+
+export function resetGameParams() {
+  finalTime = null;
+  setAiming(false);
   strokes = 0;
   startedAt = null;
   updateStrokesText();
-  updateTimeText(0);
+  updateTimeText(0);    
 }
 
 export function hitBall(dx, dy){
@@ -102,16 +106,18 @@ export function initializeGame(s, h, obstacles){
 
   alignHoleAndBall(hole, ball);
 
-  aiming = false;
+  setAiming(false);
   strokes = 0;
   startedAt = null;
   finalTime = null;
+
+  setAimMode(0);
 
   walls = [];
   floors = [];
 
   obstacles.forEach(o => {
-    if (o.material === 'wall') {
+    if (o.material.includes('wall') && o.material !== 'wall_passable') {
       addWall(o.x, o.y, o.w, o.h, o.material);
     } else {
       addFloor(o.x, o.y, o.w, o.h, o.material);
@@ -149,26 +155,100 @@ function stopBall(){
   ball.vy = 0;
 }
 
+function resetIllegalMove() {
+  ball.x = previousLocation.x;
+  ball.y = previousLocation.y;
+  ball.vx = ball.vy = 0;
+  playAudio('illegal');
+}
+
+function HazardCheck() {
+  if (getMaterialAt(ball.x, ball.y) === "water") {
+    resetIllegalMove();
+    return true;
+  }
+
+  if(ball.x < 0 || ball.x > WIDTH || ball.y < 0 || ball.y > HEIGHT) {
+    resetIllegalMove();
+    return true;
+  }
+
+  return false;
+}
+
+function getFrictionValue(modifier) {
+  if(modifier == null)
+    return FRICTION; // default friction if no modifier
+
+  return FRICTION + modifier;
+}
+
+function applyFrictionForce(currentMaterial, dt) {
+  const base = getFrictionValue(frictionModifiers[currentMaterial] ?? null); 
+  const frictionCoefficient = -Math.log(base); 
+  // e.g. base=0.98 → coefficient≈0.0202
+
+  const speed = Math.hypot(ball.vx, ball.vy);
+  if (speed > 0) {
+    const decel = frictionCoefficient * speed; // proportional to velocity
+    const fx = (ball.vx / speed) * decel;
+    const fy = (ball.vy / speed) * decel;
+
+    ball.vx -= fx * dt;
+    ball.vy -= fy * dt;
+  }
+}
+
+function applyHillAcceleration(currentMaterial, dt) {
+  if (currentMaterial && currentMaterial.startsWith('hill_')) {
+    const hillDirection = currentMaterial.split('_')[1]; // 'n', 'ne', 'e', etc.
+
+    // Angle in radians: 0 = right (east), π/2 = down (south)
+    const angleMap = {
+      n: -Math.PI / 2,      // up
+      ne: -Math.PI / 4,     // up-right
+      e: 0,                 // right
+      se: Math.PI / 4,      // down-right
+      s: Math.PI / 2,       // down
+      sw: 3 * Math.PI / 4,  // down-left
+      w: Math.PI,           // left
+      nw: -3 * Math.PI / 4  // up-left
+    };
+
+    const angle = angleMap[hillDirection];
+    const ax = Math.cos(angle) * HILL_ACCELERATION;
+    const ay = Math.sin(angle) * HILL_ACCELERATION;
+
+    // acceleration applied over time
+    ball.vx += ax * dt;
+    ball.vy += ay * dt;
+  }
+}
+
 export function update(dt) {
   if (finalTime != null) return;
 
-  // Water hazard check
-  if (getMaterialAt(ball.x, ball.y) === "water") {
-    ball.x = previousLocation.x;
-    ball.y = previousLocation.y;
-    ball.vx = ball.vy = 0;
-    playAudio('illegal');
+  if (HazardCheck()) {
     return;
   }
 
-  updateBall(ball, dt, walls);
+  updateBall(ball, dt, walls); // check wall collisions
 
-  // Apply friction
   const currentMaterial = getMaterialAt(ball.x, ball.y);
-  let friction = frictionModifiers[currentMaterial] || FRICTION;
+
+  applyHillAcceleration(currentMaterial, dt);
+
+  
+/*
+let friction = getFrictionValue(frictionModifiers[currentMaterial]);
+  if(currentMaterial != null && currentMaterial.startsWith('hill_'))
+    friction = 0.989; // no friction on hills
 
   ball.vx *= friction;
   ball.vy *= friction;
+  */
+
+  applyFrictionForce(currentMaterial, dt);
 
   // Stop ball if below velocity threshold
   if (Math.abs(ball.vx) + Math.abs(ball.vy) < STOP) {
@@ -187,6 +267,108 @@ export function update(dt) {
   }
 }
 
+function updateBall(ball, dt, walls) {
+  // Compute speed and decide number of substeps
+  const speed = Math.hypot(ball.vx, ball.vy);
+  let steps = Math.ceil((speed * dt) / BALL_R);
+  steps = Math.max(1, steps); // At least one step
+  const stepDt = dt / steps;
+
+  for (let i = 0; i < steps; i++) {
+    moveBallStep(ball, stepDt, walls);
+  }
+}
+
+function canPassThrough(wall, vx, vy) {
+  if (!wall.material.startsWith('wall_')) return false;
+
+  switch (wall.material) {
+    case 'wall_n': return vy <= 0;   // can only pass south → north (vy < 0)
+    case 'wall_s': return vy >= 0;   // north → south (vy > 0)
+    case 'wall_e': return vx >= 0;   // west → east (vx > 0)
+    case 'wall_w': return vx <= 0;   // east → west (vx < 0)
+    default: return false;
+  }
+}
+
+function moveBallStep(ball, dt, walls) {
+  let newX = ball.x + ball.vx * dt;
+  let newY = ball.y + ball.vy * dt;
+
+  let touchedBouncyWall = false;
+
+  for (let wall of walls) {
+    if(wall.material !== 'wall_bouncy') continue;
+
+    const left   = wall.x - BALL_R;
+    const right  = wall.x + wall.w + BALL_R;
+    const top    = wall.y - BALL_R;
+    const bottom = wall.y + wall.h + BALL_R;
+
+    if (ball.y > top && ball.y < bottom && newX > left && newX < right) {
+      touchedBouncyWall = true;
+      break;
+    }else if (ball.x > left && ball.x < right && newY > top && newY < bottom) {
+      touchedBouncyWall = true;
+      break;
+    }
+  }
+
+  for (let wall of walls) {
+    const left   = wall.x - BALL_R;
+    const right  = wall.x + wall.w + BALL_R;
+    const top    = wall.y - BALL_R;
+    const bottom = wall.y + wall.h + BALL_R;
+
+    // Y overlap → possible X collision
+    if (ball.y > top && ball.y < bottom && newX > left && newX < right) {
+      if (canPassThrough(wall, ball.vx, 0)) continue;
+
+      if (ball.vx > 0) newX = left;
+      else if (ball.vx < 0) newX = right;
+
+      ball.vx *= -1; // normal reflection for X
+    }
+  }
+  ball.x = newX;
+
+  // --- Move in Y ---
+  
+  for (let wall of walls) {
+    const left   = wall.x - BALL_R;
+    const right  = wall.x + wall.w + BALL_R;
+    const top    = wall.y - BALL_R;
+    const bottom = wall.y + wall.h + BALL_R;
+
+    // X overlap → possible Y collision
+    if (ball.x > left && ball.x < right && newY > top && newY < bottom) {
+      if (canPassThrough(wall, 0, ball.vy)) continue;
+
+      if (ball.vy > 0) newY = top;
+      else if (ball.vy < 0) newY = bottom;
+
+      ball.vy *= -1; // normal reflection for Y
+    }
+  }
+  ball.y = newY;
+
+  // --- Apply bouncy wall speed boost ---
+  if (touchedBouncyWall === true) {
+    const speed = Math.hypot(ball.vx, ball.vy); // current total speed
+    if (speed > 0) { 
+      const scale = WALL_BOUNCE_POWER / speed;  // scaling factor
+      ball.vx *= scale;
+      ball.vy *= scale;
+    }
+  }
+
+  // --- Clamp speed to MAX_POWER ---
+  if(ball.vx > MAX_POWER) ball.vx = MAX_POWER;
+  if(ball.vx < -MAX_POWER) ball.vx = -MAX_POWER;
+  if(ball.vy > MAX_POWER) ball.vy = MAX_POWER;
+  if(ball.vy < -MAX_POWER) ball.vy = -MAX_POWER;
+}
+
 function sendScore(){
   const player_name=(document.getElementById('name').value||'anon').slice(0,12);
   const time_ms = Math.round((performance.now()-startedAt)||0);
@@ -196,54 +378,4 @@ function sendScore(){
   const timestamp = new Date().toISOString();
 
   submitScore(player_name, time, score, level, timestamp)
-}
-
-export function updateBall(ball, dt, blocks) {
-  // Compute speed and decide number of substeps
-  const speed = Math.hypot(ball.vx, ball.vy);
-  let steps = Math.ceil((speed * dt) / BALL_R);
-  steps = Math.max(1, steps); // At least one step
-  const stepDt = dt / steps;
-
-  for (let i = 0; i < steps; i++) {
-    moveBallStep(ball, stepDt, blocks);
-  }
-}
-
-export function moveBallStep(ball, dt, blocks) {
-  // --- Move in X direction ---
-  let newX = ball.x + ball.vx * dt;
-
-  for (let block of blocks) {
-    const left   = block.x - BALL_R;
-    const right  = block.x + block.w + BALL_R;
-    const top    = block.y - BALL_R;
-    const bottom = block.y + block.h + BALL_R;
-
-    // Check if Y is overlapping → only vertical collision possible
-    if (ball.y > top && ball.y < bottom && newX > left && newX < right) {
-      if (ball.vx > 0) newX = left;       // hitting left wall
-      else if (ball.vx < 0) newX = right; // hitting right wall
-      ball.vx *= -1;                       // reflect X velocity
-    }
-  }
-  ball.x = newX;
-
-  // --- Move in Y direction ---
-  let newY = ball.y + ball.vy * dt;
-
-  for (let block of blocks) {
-    const left   = block.x - BALL_R;
-    const right  = block.x + block.w + BALL_R;
-    const top    = block.y - BALL_R;
-    const bottom = block.y + block.h + BALL_R;
-
-    // Check if X is overlapping → only horizontal collision possible
-    if (ball.x > left && ball.x < right && newY > top && newY < bottom) {
-      if (ball.vy > 0) newY = top;        // hitting top wall
-      else if (ball.vy < 0) newY = bottom; // hitting bottom wall
-      ball.vy *= -1;                        // reflect Y velocity
-    }
-  }
-  ball.y = newY;
 }
