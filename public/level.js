@@ -56,6 +56,9 @@ export function importLevel() {
     spawn.x *= TILE_SIZE;
     spawn.y *= TILE_SIZE;
 
+    hole.x *= TILE_SIZE;
+    hole.y *= TILE_SIZE;
+
     for (let y = 0; y < GRID_H; y++) {
       for (let x = 0; x < GRID_W; x++) {
           var floorMat = Object.keys(FLOOR_TILE_MATERIALS).find(key => FLOOR_TILE_MATERIALS[key] === floorGrid[y][x]);
