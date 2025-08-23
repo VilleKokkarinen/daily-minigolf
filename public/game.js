@@ -467,7 +467,7 @@ function collideTriangleTile(ball, wall, orientation, newX, newY) {
   if (orientation === "tl") {
     verts = [ {x, y}, {x: x+s, y}, {x, y:y+s} ];
   } else if (orientation === "tr") {
-    verts = [ {x:x+s, y}, {x:x+s, y:y+s}, {x, y:y+s} ];
+    verts =  [ {x, y}, {x:x+s, y}, {x:x+s, y:y+s} ];
   } else if (orientation === "bl") {
     verts =  [ {x, y}, {x:x+s, y:y+s}, {x, y:y+s} ];
   } else if (orientation === "br") {
