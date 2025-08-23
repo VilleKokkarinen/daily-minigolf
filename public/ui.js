@@ -1,9 +1,9 @@
-import { HOLE_R, BALL_R, TILE_SIZE } from './config.js';
-import { resetGame } from './game.js';
+import { HOLE_R, BALL_R, TILE_SIZE, WALL_TILE_MATERIALS } from './config.js';
+import { resetGameParams } from './game.js';
 import { getAsset } from './assets.js';
 import { muteSwitch } from './game.js';
 import { getLeaderboard } from './supabase.js';
-import { tilePatterns } from './assets.js';
+import { FLOOR_TILE_PATTERNS, WALL_TILE_PATTERNS } from './assets.js';
 import { mouse } from './input.js';
 import { walls, floors, hole, ball, aiming, aimMode, strokes, setAimMode, spawn } from './game.js';
 import { computePower } from './physics.js';
@@ -46,7 +46,7 @@ AimModeIcon.addEventListener("click", () => {
 })
 
 resetEl.onclick = () => {
-  resetGame();   
+  resetGameParams();
 };
 
 export function updateAimIcon() {
@@ -94,20 +94,23 @@ function escapeHtml(s){return (s+"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&l
 
 export function draw(){
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  for (const w of walls) {
-    ctx.fillStyle = tilePatterns[w.material] || '#ff00ff';
-    ctx.fillRect(w.x, w.y, w.w, w.h);
-  }
 
   for (const f of floors) {
-    ctx.fillStyle = tilePatterns[f.material] || '#ff00ff';
+    ctx.fillStyle = FLOOR_TILE_PATTERNS[f.material] || '#ff00ff';
     ctx.fillRect(f.x, f.y, f.w, f.h);
   }
 
+  for (const w of walls) {
+    ctx.fillStyle = WALL_TILE_PATTERNS[w.material] || '#ff00ff';
+    ctx.fillRect(w.x, w.y, w.w, w.h);
+  }
+
+  /*
   ctx.fillStyle = tilePatterns.grass || '#ff00ff';
   ctx.fillRect(spawn.x, spawn.y, TILE_SIZE, TILE_SIZE);
   ctx.fillRect(hole.x-TILE_SIZE/2, hole.y-TILE_SIZE/2, TILE_SIZE, TILE_SIZE); // adjusted position, as hole pos is centered
-
+  */
+ 
   ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R+2,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(ball.x,ball.y,BALL_R,0,Math.PI*2); ctx.fill();

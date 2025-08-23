@@ -1,4 +1,4 @@
-import { WIDTH, HEIGHT, MAX_POWER, WALL_BOUNCE_POWER, BALL_R, FRICTION, STOP, HOLE_R, frictionModifiers, HILL_ACCELERATION, todayStr} from './config.js';
+import { TILE_SIZE, WIDTH, HEIGHT, MAX_POWER, WALL_BOUNCE_POWER, BALL_R, FRICTION, STOP, HOLE_R, frictionModifiers, HILL_ACCELERATION, todayStr} from './config.js';
 import { updateStrokesText, updateTimeText, updateAimIcon} from './ui.js';
 import { submitScore } from './supabase.js';
 import { computePower } from "./physics.js";
@@ -65,7 +65,10 @@ export function resetGameParams() {
   strokes = 0;
   startedAt = null;
   updateStrokesText();
-  updateTimeText(0);    
+  updateTimeText(0);
+
+  if(spawn != null)
+    ball = { x: spawn.x, y: spawn.y, vx: 0, vy: 0 };
 }
 
 export function hitBall(dx, dy){
@@ -95,7 +98,7 @@ export function hitBall(dx, dy){
   updateStrokesText();
 }
 
-export function initializeGame(s, h, obstacles){
+export function initializeGame(s, h, f, w){
   ball.x = s.x;
   ball.y = s.y;
   ball.vx = 0;
@@ -113,15 +116,12 @@ export function initializeGame(s, h, obstacles){
 
   setAimMode(0);
 
-  walls = [];
-  floors = [];
+  f.forEach(o => {
+    addFloor(o.x, o.y, o.w, o.h, o.material);
+  });
 
-  obstacles.forEach(o => {
-    if (o.material.includes('wall') && o.material !== 'wall_passable') {
-      addWall(o.x, o.y, o.w, o.h, o.material);
-    } else {
-      addFloor(o.x, o.y, o.w, o.h, o.material);
-    }
+  w.forEach(o => {
+    addWall(o.x, o.y, o.w, o.h, o.material);
   });
 }
 
@@ -134,20 +134,6 @@ export function getMaterialAt(x, y) {
     }
   }
   return null;
-}
-  
-export function reflectVelocity(vel, normal) {
-  // normalize normal
-  let nLen = Math.hypot(normal.x, normal.y);
-  let nx = normal.x / nLen, ny = normal.y / nLen;
-
-  // dot product
-  let dot = vel.x * nx + vel.y * ny;
-
-  return {
-    x: vel.x - 2 * dot * nx,
-    y: vel.y - 2 * dot * ny
-  };
 }
 
 function stopBall(){
@@ -238,16 +224,6 @@ export function update(dt) {
 
   applyHillAcceleration(currentMaterial, dt);
 
-  
-/*
-let friction = getFrictionValue(frictionModifiers[currentMaterial]);
-  if(currentMaterial != null && currentMaterial.startsWith('hill_'))
-    friction = 0.989; // no friction on hills
-
-  ball.vx *= friction;
-  ball.vy *= friction;
-  */
-
   applyFrictionForce(currentMaterial, dt);
 
   // Stop ball if below velocity threshold
@@ -291,76 +267,515 @@ function canPassThrough(wall, vx, vy) {
   }
 }
 
+function reflect(vx, vy, nx, ny) {
+  // Normalize the normal
+  const len = Math.hypot(nx, ny);
+  if (len === 0) return { vx, vy };
+  nx /= len; ny /= len;
+
+  // Reflect: v' = v - 2*(v·n)*n
+  const dot = vx * nx + vy * ny;
+  return {
+    vx: vx - 2 * dot * nx,
+    vy: vy - 2 * dot * ny
+  };
+}
+
+function collideCircleTile(ball, wall, newX, newY) {
+  const cx = wall.x + wall.w / 2;
+  const cy = wall.y + wall.h / 2;
+  const r = wall.w / 2;
+
+  let vx = ball.vx;
+  let vy = ball.vy;
+
+  const dx = newX - cx;
+  const dy = newY - cy;
+  const dist = Math.hypot(dx, dy);
+
+  let collision = false;
+
+  if (dist < r + BALL_R) {    
+    // push ball out
+    const overlap = (r + BALL_R) - dist;
+    const nx = dx / dist;
+    const ny = dy / dist;
+
+    newX += nx * overlap;
+    newY += ny * overlap;
+
+    // reflect
+    const newVel = reflect(vx, vy, nx, ny);
+    vx = newVel.vx;
+    vy = newVel.vy;
+
+    collision = true;
+  }
+
+  return { newX, newY, vx, vy, collision, wall };
+}
+
+function collideLargeCircleTile(ball, wall, orientation, newX, newY) {
+
+  // Tile contains one quarter of a circle
+
+  const s = wall.w; // TILE_SIZE
+  const r = s;
+  let cx, cy;
+  if (orientation === "br") {
+    cx = wall.x + s;
+    cy = wall.y + s;
+  }
+  else if (orientation === "bl") {
+    cx = wall.x;
+    cy = wall.y + s;
+  }
+  else if (orientation === "tl") {
+    cx = wall.x;
+    cy = wall.y;
+  }
+  else if (orientation === "tr") {
+    cx = wall.x + s;
+    cy = wall.y;
+  }
+  const dx = newX - cx;
+  const dy = newY - cy;
+  const dist = Math.hypot(dx, dy);
+  let vx = ball.vx;
+  let vy = ball.vy;
+  let collision = false;
+
+  if (dist < r + BALL_R) {
+    // Ensure it's the correct quarter (not full circle)
+
+    let valid = false;
+    if (orientation === "br" && dx >= 0 && dy >= 0) valid = true;
+    if (orientation === "bl" && dx <= 0 && dy >= 0) valid = true;
+    if (orientation === "tl" && dx <= 0 && dy <= 0) valid = true;
+    if (orientation === "tr" && dx >= 0 && dy <= 0) valid = true;
+
+    if (valid) {
+      const overlap = (r + BALL_R) - dist;
+      const nx = dx / dist;
+      const ny = dy / dist;
+      newX += nx * overlap;
+      newY += ny * overlap;
+      const newVel = reflect(vx, vy, nx, ny);
+      vx = newVel.vx;
+      vy = newVel.vy;
+      collision = true;
+    }
+  }
+  return { newX, newY, vx, vy, collision, wall };
+}
+
+function collideRectTile(ball, wall, newX, newY) {
+  const cx = wall.x + wall.w / 2;
+  const cy = wall.y + wall.h / 2;
+  const r = wall.w / 2;
+
+  const verts = [
+    {x: cx - r, y: cy - r}, // top-left
+    {x: cx + r, y: cy - r}, // top-right
+    {x: cx + r, y: cy + r}, // bottom-right
+    {x: cx - r, y: cy + r}  // bottom-left
+  ];
+
+  let vx = ball.vx;
+  let vy = ball.vy;
+
+  let collision = false;
+
+  const closest = closestPointOnPolygon(newX, newY, verts);
+  const dx = newX - closest.x;
+  const dy = newY - closest.y;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist < BALL_R) {
+    if (canPassThrough(wall, vx, vy)){ // if the wall is one-way
+      return { newX, newY, vx, vy, collision, wall };
+    }
+
+    const overlap = BALL_R - dist;
+    const nx = dx / dist;
+    const ny = dy / dist;
+
+    newX += nx * overlap;
+    newY += ny * overlap;
+
+    const newVel = reflect(vx, vy, nx, ny);
+    vx = newVel.vx;
+    vy = newVel.vy;
+    collision = true;
+
+    if(wall.material === 'wall_sticky') {
+      vx *= STOP;
+      vy *= STOP;
+    }
+    else if(wall.material === 'wall_bouncy') {
+      const speed = Math.hypot(vx, vy);
+      if (speed > 0) { 
+        const scale = WALL_BOUNCE_POWER / speed;  // scaling factor
+        vx *= scale;
+        vy *= scale;
+      }
+    }
+  }
+
+  return { newX, newY, vx, vy, collision, wall };
+}
+
+function closestPointOnSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return { x: x1, y: y1 };
+
+  let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+
+  return { x: x1 + t * dx, y: y1 + t * dy };
+}
+
+function closestPointOnPolygon(px, py, verts) {
+  let closest = null;
+  let minDist2 = Infinity;
+
+  for (let i = 0; i < verts.length; i++) {
+    const v1 = verts[i];
+    const v2 = verts[(i + 1) % verts.length]; // loop around
+    const p = closestPointOnSegment(px, py, v1.x, v1.y, v2.x, v2.y);
+
+    const dx = px - p.x;
+    const dy = py - p.y;
+    const dist2 = dx * dx + dy * dy;
+
+    if (dist2 < minDist2) {
+      minDist2 = dist2;
+      closest = p;
+    }
+  }
+  return closest;
+}
+
+function collideTriangleTile(ball, wall, orientation, newX, newY) {
+  const x = wall.x;
+  const y = wall.y;
+  const s = wall.w; // tile size
+
+  let verts;
+  if (orientation === "tl") {
+    verts = [ {x, y}, {x: x+s, y}, {x, y:y+s} ];
+  } else if (orientation === "tr") {
+    verts = [ {x:x+s, y}, {x:x+s, y:y+s}, {x, y:y+s} ];
+  } else if (orientation === "bl") {
+    verts =  [ {x, y}, {x:x+s, y:y+s}, {x, y:y+s} ];
+  } else if (orientation === "br") {
+    verts =  [ {x:x+s, y}, {x:x+s, y:y+s}, {x, y:y+s} ];
+  }
+
+  if(verts == undefined) return { newX, newY, vx: ball.vx, vy: ball.vy, collision: false, wall };
+
+  let vx = ball.vx;
+  let vy = ball.vy;
+  let collision = false;
+  const closest = closestPointOnPolygon(newX, newY, verts);
+  const dx = newX - closest.x;
+  const dy = newY - closest.y;
+  const dist = Math.hypot(dx, dy);
+  
+  if (dist < BALL_R) {
+    const overlap = BALL_R - dist;
+    const nx = dx / dist;
+    const ny = dy / dist;
+    newX += nx * overlap;
+    newY += ny * overlap;
+    const newVel = reflect(vx, vy, nx, ny);
+    vx = newVel.vx;
+    vy = newVel.vy;
+    collision = true;
+  }
+
+  return { newX, newY, vx, vy, collision, wall };
+}
+
+function collideDiamondTile(ball, wall, newX, newY) {
+  const cx = wall.x + wall.w / 2;
+  const cy = wall.y + wall.h / 2;
+  const r = wall.w / 2;
+
+  const verts = [
+    {x: cx, y: cy - r}, // top
+    {x: cx + r, y: cy}, // right
+    {x: cx, y: cy + r}, // bottom
+    {x: cx - r, y: cy}  // left
+  ];
+
+  let vx = ball.vx;
+  let vy = ball.vy;
+
+  let collision = false;
+
+  const closest = closestPointOnPolygon(newX, newY, verts);
+  const dx = newX - closest.x;
+  const dy = newY - closest.y;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist < BALL_R) {
+    const overlap = BALL_R - dist;
+    const nx = dx / dist;
+    const ny = dy / dist;
+
+    newX += nx * overlap;
+    newY += ny * overlap;
+
+    const newVel = reflect(vx, vy, nx, ny);
+    vx = newVel.vx;
+    vy = newVel.vy;
+    collision = true;
+  }
+
+  return { newX, newY, vx, vy, collision, wall };
+}
+
+function collideHalfRectTile(ball, wall, newX, newY, orientation) {
+  let rect;
+  if (orientation === "s") {
+    rect = { x: wall.x, y: wall.y, w: TILE_SIZE, h: TILE_SIZE/2, material: wall.material };
+  } else if (orientation === "n") {
+    rect = { x: wall.x, y: wall.y + TILE_SIZE/2, w: TILE_SIZE, h: TILE_SIZE/2, material: wall.material };
+  } else if (orientation === "e") {
+    rect = { x: wall.x, y: wall.y, w: TILE_SIZE/2, h: TILE_SIZE, material: wall.material };
+  } else if (orientation === "w") {
+    rect = { x: wall.x + TILE_SIZE/2, y: wall.y, w: TILE_SIZE/2, h: TILE_SIZE, material: wall.material };
+  }
+  return collideRectTile(ball, rect, newX, newY);
+}
+
+function collideQuarterRectTile(ball, wall, newX, newY, orientation) {
+  let rect;
+  if (orientation === "tl") {
+    rect = { x: wall.x, y: wall.y, w: TILE_SIZE/2, h: TILE_SIZE/2, material: wall.material };
+  } else if (orientation === "tr") {
+    rect = { x: wall.x + TILE_SIZE/2, y: wall.y, w: TILE_SIZE/2, h: TILE_SIZE/2, material: wall.material };
+  } else if (orientation === "bl") {
+    rect = { x: wall.x, y: wall.y + TILE_SIZE/2, w: TILE_SIZE/2, h: TILE_SIZE/2, material: wall.material };
+  } else if (orientation === "br") {
+    rect = { x: wall.x + TILE_SIZE/2, y: wall.y + TILE_SIZE/2, w: TILE_SIZE/2, h: TILE_SIZE/2, material: wall.material };
+  }
+  return collideRectTile(ball, rect, newX, newY);
+}
+
+function collideHalfTriangleTile(ball, wall, orientation, newX, newY) {
+  const x = wall.x;
+  const y = wall.y;
+  const s = wall.w;
+
+  const tip = Math.ceil(s/2)+1;
+
+  let verts;
+  if (orientation === "e") {
+    verts = [ {x, y}, {x:x+tip, y:y+s/2}, {x, y:y+s} ];
+  } else if (orientation === "w") {
+    verts = [ {x:x+s, y}, {x:x+s-tip, y:y+s/2}, {x:x+s, y:y+s} ];
+  } else if (orientation === "s") {
+    verts = [ {x, y}, {x:x+s/2, y:y+tip}, {x:x+s, y} ];
+  } else if (orientation === "n") {
+    verts = [ {x, y:y+s}, {x:x+s/2, y:y+s-tip}, {x:x+s, y:y+s} ];
+  }
+
+  const closest = closestPointOnPolygon(newX, newY, verts);
+  const dx = newX - closest.x;
+  const dy = newY - closest.y;
+  const dist = Math.hypot(dx, dy);
+  let vx = ball.vx;
+  let vy = ball.vy;
+  let collision = false;
+
+  if (dist < BALL_R) {
+    const overlap = BALL_R - dist;
+    const nx = dx / dist;
+    const ny = dy / dist;
+    newX += nx * overlap;
+    newY += ny * overlap;
+    const newVel = reflect(vx, vy, nx, ny);
+    vx = newVel.vx;
+    vy = newVel.vy;
+    collision = true;
+  }
+  return { newX, newY, vx, vy, collision, wall };
+}
+
+function collideRoundedEndTile(ball, wall, orientation, newX, newY) {
+  // this tile is made up of 2 parts. a square at bottom sized at 2/3 of TILE_SIZE.
+  // and a circle at the end with diameter TILE_SIZE.
+
+  let rect, circle;
+  if (orientation === "n") { // pointing up
+    rect = { x: wall.x, y: wall.y + TILE_SIZE/3, w: TILE_SIZE, h: TILE_SIZE*2/3, material: wall.material };
+    circle = { 
+      x: wall.x, 
+      y: wall.y - TILE_SIZE/2 + TILE_SIZE/3 + 1, // nudged down 1px
+      w: TILE_SIZE, h: TILE_SIZE, material: wall.material 
+    };
+  } else if (orientation === "s") { // pointing down
+    rect = { x: wall.x, y: wall.y, w: TILE_SIZE, h: TILE_SIZE*2/3, material: wall.material };
+    circle = { 
+      x: wall.x, 
+      y: wall.y + TILE_SIZE*2/3 - TILE_SIZE/2 - 1, // nudged up 1px
+      w: TILE_SIZE, h: TILE_SIZE, material: wall.material 
+    };
+  } else if (orientation === "e") { // pointing right
+    rect = { x: wall.x, y: wall.y, w: TILE_SIZE*2/3, h: TILE_SIZE, material: wall.material };
+    circle = { 
+      x: wall.x + TILE_SIZE*2/3 - TILE_SIZE/2 - 1, // nudged left 1px
+      y: wall.y, 
+      w: TILE_SIZE, h: TILE_SIZE, material: wall.material 
+    };
+  } else if (orientation === "w") { // pointing left
+    rect = { x: wall.x + TILE_SIZE/3, y: wall.y, w: TILE_SIZE*2/3, h: TILE_SIZE, material: wall.material };
+    circle = { 
+      x: wall.x + TILE_SIZE/3 - TILE_SIZE/2 + 1, // nudged right 1px
+      y: wall.y, 
+      w: TILE_SIZE, h: TILE_SIZE, material: wall.material 
+    };
+  }
+
+  let res = collideRectTile(ball, rect, newX, newY);
+  if (res.collision === true) return res;
+  return collideCircleTile(ball, circle, newX, newY);  
+}
+
+const rectangleWalls = new Set([
+  "wall", "wall_n", "wall_e", "wall_s", "wall_w",
+  "wall_sticky", "wall_bouncy"
+]);
+
+const halfWalls = new Set([
+  "wall_half_n", "wall_half_e", "wall_half_s", "wall_half_w"
+]);
+
+const quarterWalls = new Set([
+  "wall_quarter_br", "wall_quarter_bl", "wall_quarter_tl", "wall_quarter_tr"
+]);
+
+const triangleWalls = new Set([
+  "wall_triangle_br", "wall_triangle_bl", "wall_triangle_tl", "wall_triangle_tr"
+]);
+
+const halfTriangleWalls = new Set([
+  "wall_small_triangle_n", "wall_small_triangle_e", "wall_small_triangle_s", "wall_small_triangle_w"
+]);
+
+const largeCircleWalls = new Set([
+  "wall_large_circle_br", "wall_large_circle_bl", "wall_large_circle_tl", "wall_large_circle_tr"
+]);
+
+const roundedEndWalls = new Set([
+  "wall_rounded_n", "wall_rounded_e", "wall_rounded_s", "wall_rounded_w"
+]);
+
 function moveBallStep(ball, dt, walls) {
   let newX = ball.x + ball.vx * dt;
   let newY = ball.y + ball.vy * dt;
 
-  let touchedBouncyWall = false;
+  let collisions = [];
 
-  for (let wall of walls) {
-    if(wall.material !== 'wall_bouncy') continue;
+   for (let wall of walls) {
 
-    const left   = wall.x - BALL_R;
-    const right  = wall.x + wall.w + BALL_R;
-    const top    = wall.y - BALL_R;
-    const bottom = wall.y + wall.h + BALL_R;
+    const mat = wall.material;
+    
+    if(rectangleWalls.has(mat)) {
+      const res = collideRectTile(ball, wall, newX, newY);
+      if(res.collision === true) collisions.push(res);
+      continue;
+    }
 
-    if (ball.y > top && ball.y < bottom && newX > left && newX < right) {
-      touchedBouncyWall = true;
-      break;
-    }else if (ball.x > left && ball.x < right && newY > top && newY < bottom) {
-      touchedBouncyWall = true;
-      break;
+    if(halfWalls.has(mat)) {
+      const orientation = mat.split('_')[2]; // n, e, s, w
+      const res = collideHalfRectTile(ball, wall, newX, newY, orientation);
+      if(res.collision === true) collisions.push(res);
+       continue;
+    }
+
+    if(quarterWalls.has(mat)) {
+      const orientation = mat.split('_')[2]; // br, bl, tl, tr
+      const res = collideQuarterRectTile(ball, wall, newX, newY, orientation);
+      if(res.collision === true) collisions.push(res);
+       continue;
+    }
+
+    if(mat === 'wall_circle') {
+      const res = collideCircleTile(ball, wall, newX, newY);
+      if(res.collision === true) collisions.push(res);
+      continue;
+    }
+
+    if(mat === 'wall_circle_half') {
+      const smallCircle = { x: wall.x + TILE_SIZE/4, y: wall.y + TILE_SIZE/4, w: (TILE_SIZE/2)+1, h: (TILE_SIZE/2)+1, material: wall.material };
+      const res = collideCircleTile(ball, smallCircle, newX, newY);
+      if(res.collision === true) collisions.push(res);
+      continue;
+    }
+
+    if(largeCircleWalls.has(mat)) {
+      const orientation = mat.split('_')[3]; // br, bl, tl, tr
+      const res = collideLargeCircleTile(ball, wall, orientation, newX, newY);
+      if(res.collision === true) collisions.push(res);
+      continue;
+    }
+
+    if(mat === 'wall_diamond') {
+      const res = collideDiamondTile(ball, wall, newX, newY);
+      if(res.collision === true) collisions.push(res);
+      continue;
+    }
+
+    if(triangleWalls.has(mat)) {
+      const orientation = mat.split('_')[2]; // br, bl, tl, tr
+      const res = collideTriangleTile(ball, wall, orientation, newX, newY);
+      if(res.collision === true) collisions.push(res);
+        continue;
+    }
+
+    if(halfTriangleWalls.has(mat)) {
+      const orientation = mat.split('_')[3]; // n, e, s, w
+      const res = collideHalfTriangleTile(ball, wall, orientation, newX, newY);
+      if(res.collision === true) collisions.push(res);
+        continue;
+    }
+
+    if(roundedEndWalls.has(mat)) {
+      const orientation = mat.split('_')[2]; // n, e, s, w
+       const res = collideRoundedEndTile(ball, wall, orientation, newX, newY);
+      if(res.collision === true) collisions.push(res);
+        continue;
     }
   }
 
-  for (let wall of walls) {
-    const left   = wall.x - BALL_R;
-    const right  = wall.x + wall.w + BALL_R;
-    const top    = wall.y - BALL_R;
-    const bottom = wall.y + wall.h + BALL_R;
+  // --- If multiple collisions, pick the one closest to tile center ---
 
-    // Y overlap → possible X collision
-    if (ball.y > top && ball.y < bottom && newX > left && newX < right) {
-      if (canPassThrough(wall, ball.vx, 0)) continue;
-
-      if (ball.vx > 0) newX = left;
-      else if (ball.vx < 0) newX = right;
-
-      ball.vx *= -1; // normal reflection for X
+  var closestTileCenterCollision = null;
+  let minDist2 = Infinity;
+  for(const c of collisions) {
+    const dx = c.wall.x + c.wall.w/2 - ball.x;
+    const dy = c.wall.y + c.wall.h/2 - ball.y;
+    const dist2 = dx*dx + dy*dy;
+    if(dist2 < minDist2) {
+      minDist2 = dist2;
+      closestTileCenterCollision = c;
     }
   }
+
+  if(closestTileCenterCollision != undefined && closestTileCenterCollision.collision === true){
+    newX = closestTileCenterCollision.newX;
+    newY = closestTileCenterCollision.newY;
+    ball.vx = closestTileCenterCollision.vx;
+    ball.vy = closestTileCenterCollision.vy;
+  } 
+
   ball.x = newX;
-
-  // --- Move in Y ---
-  
-  for (let wall of walls) {
-    const left   = wall.x - BALL_R;
-    const right  = wall.x + wall.w + BALL_R;
-    const top    = wall.y - BALL_R;
-    const bottom = wall.y + wall.h + BALL_R;
-
-    // X overlap → possible Y collision
-    if (ball.x > left && ball.x < right && newY > top && newY < bottom) {
-      if (canPassThrough(wall, 0, ball.vy)) continue;
-
-      if (ball.vy > 0) newY = top;
-      else if (ball.vy < 0) newY = bottom;
-
-      ball.vy *= -1; // normal reflection for Y
-    }
-  }
   ball.y = newY;
-
-  // --- Apply bouncy wall speed boost ---
-  if (touchedBouncyWall === true) {
-    const speed = Math.hypot(ball.vx, ball.vy); // current total speed
-    if (speed > 0) { 
-      const scale = WALL_BOUNCE_POWER / speed;  // scaling factor
-      ball.vx *= scale;
-      ball.vy *= scale;
-    }
-  }
 
   // --- Clamp speed to MAX_POWER ---
   if(ball.vx > MAX_POWER) ball.vx = MAX_POWER;
