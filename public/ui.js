@@ -1,11 +1,11 @@
-import { HOLE_R, BALL_R, TILE_SIZE, WALL_TILE_MATERIALS } from './config.js';
+import { HOLE_R, BALL_R } from './config.js';
 import { resetGameParams } from './game.js';
 import { getAsset } from './assets.js';
 import { muteSwitch } from './game.js';
 import { getLeaderboard } from './supabase.js';
 import { FLOOR_TILE_PATTERNS, WALL_TILE_PATTERNS } from './assets.js';
 import { mouse } from './input.js';
-import { walls, floors, hole, ball, aiming, aimMode, strokes, setAimMode, spawn } from './game.js';
+import { walls, floors, hole, ball, aiming, aimMode, strokes, setAimMode } from './game.js';
 import { computePower } from './physics.js';
 
 export const canvas = document.getElementById('g');
@@ -26,6 +26,8 @@ export const statusEl = document.getElementById('status');
 export const rowsEl = document.getElementById('rows');
 
 export const playerNameEl = document.getElementById('name');
+
+export const levelByEl = document.getElementById('level-by');
 
 muteIcon.src = getAsset("audio.png");
 
@@ -68,6 +70,20 @@ export function updateStatusText(text) {
 export function resetTimeAndStrokesText(){
   strokesEl.textContent='0';
   timeEl.textContent='0.0s';
+}
+
+export function updateLevelByText(name) {
+  if(name != null)
+  levelByEl.textContent = `By: ${name}`;
+  else
+  levelByEl.textContent = '';
+}
+
+export function updateLevelName(name) {
+  if(name != null)
+  levelNameEl.textContent = `${name}`;
+  else
+  levelNameEl.textContent = '';
 }
 
 export async function drawLeaderBoard(){ 

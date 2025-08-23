@@ -1,6 +1,7 @@
-import { GRID_W, GRID_H, FLOOR_TILE_MATERIALS, WALL_TILE_MATERIALS, TILE_SIZE, todayStr } from './config.js';
+import { GRID_W, GRID_H, FLOOR_TILE_MATERIALS, WALL_TILE_MATERIALS, TILE_SIZE } from './config.js';
 import { initializeGame, resetGameParams } from './game.js';
 import { getDailyLevelId, getDailyLevel } from './supabase.js';
+import { updateLevelByText, updateLevelName } from './ui.js';
 
 let floorGrid = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(FLOOR_TILE_MATERIALS.grass));
 let wallGrid = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(WALL_TILE_MATERIALS.wall_empty));
@@ -46,7 +47,8 @@ export function importLevel() {
     decodeFloor(data.level.floor);
     decodeWalls(data.level.walls);
 
-    document.getElementById('levelname').textContent = data.name;
+    updateLevelName(data.name);
+    updateLevelByText(data.creator_name);
 
     const spawn = data.level.spawn
     const hole = data.level.hole
