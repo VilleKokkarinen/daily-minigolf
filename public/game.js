@@ -48,11 +48,11 @@ export function setStartedAt(time) {
   startedAt = time;
 }
 
-function alignHoleAndBall(hole, ball) { // Align hole and ball to the center of their respective tiles
+function alignHoleAndBall(hole, spawn) { // Align hole and spawn to the center of their respective tiles
   hole.x += HOLE_R;
   hole.y += HOLE_R;
-  ball.x += BALL_R;
-  ball.y += BALL_R;
+  spawn.x += BALL_R;
+  spawn.y += BALL_R;
 }
 
 export function resetGame(){
@@ -99,15 +99,15 @@ export function hitBall(dx, dy){
 }
 
 export function initializeGame(s, h, f, w){
+  spawn = s;
+  hole = h;
+
+  alignHoleAndBall(hole, spawn);
+
   ball.x = s.x;
   ball.y = s.y;
   ball.vx = 0;
   ball.vy = 0;
-
-  spawn = s;
-  hole = h;
-
-  alignHoleAndBall(hole, ball);
 
   setAiming(false);
   strokes = 0;

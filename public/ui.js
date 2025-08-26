@@ -1,5 +1,5 @@
 import { HOLE_R, BALL_R } from './config.js';
-import { resetGameParams } from './game.js';
+import { finalTime, resetGameParams } from './game.js';
 import { getAsset } from './assets.js';
 import { muteSwitch } from './game.js';
 import { getLeaderboard } from './supabase.js';
@@ -120,16 +120,16 @@ export function draw(){
     ctx.fillStyle = WALL_TILE_PATTERNS[w.material] || '#ff00ff';
     ctx.fillRect(w.x, w.y, w.w, w.h);
   }
-
-  /*
-  ctx.fillStyle = tilePatterns.grass || '#ff00ff';
-  ctx.fillRect(spawn.x, spawn.y, TILE_SIZE, TILE_SIZE);
-  ctx.fillRect(hole.x-TILE_SIZE/2, hole.y-TILE_SIZE/2, TILE_SIZE, TILE_SIZE); // adjusted position, as hole pos is centered
-  */
  
-  ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R+2,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(ball.x,ball.y,BALL_R,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R-1,0,Math.PI*2); ctx.fill();
+
+  if(finalTime==null){
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(ball.x,ball.y,BALL_R,0,Math.PI*2); ctx.fill();
+  }
+  else {
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(ball.x,ball.y,BALL_R-2,0,Math.PI*2); ctx.fill();
+  }
 
   // aim line
   if (aiming) {
