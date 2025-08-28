@@ -6,7 +6,36 @@
   <title>Putt Of The Day</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico"/>
   <style>
-    html,body{margin:0;height:100%;background:#0b0f12;color:#e7ecef;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+     html, body {
+      height: 100%;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      background:#0b0f12;color:#e7ecef;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif
+    }
+
+    #main-content {
+      flex: 1; /* takes up remaining space */
+      display: flex;
+      justify-content: center; /* optional: center canvas horizontally */
+      align-items: center;    /* optional: center canvas vertically */
+    }
+
+    #footer {
+      text-align: center;
+      padding: 10px;
+      font-size: 0.9rem;
+      color: #666;
+    }
+
+    #footer a {
+      color: #007bff;
+      text-decoration: none;
+    }
+
+    #footer a:hover {
+      text-decoration: underline;
+    }
     .wrap{display:flex;flex-direction:column;align-items:center;gap:.5rem;padding:1rem}
     canvas {
       background: #0a3a1a;
@@ -25,40 +54,47 @@
     th,td{padding:.35rem;border-bottom:1px dashed #1f252a;text-align:left}
     th{opacity:.8}
     .hint{opacity:.7;font-size:.9rem}
-    .height32{height:32px}
+    .height32{height:32px}    
   </style>
 </head>
   <body>
-    <div class="wrap">
-      <h1 style="margin:.25rem 0">Putt Of The Day</h1>
-      <h2 style="margin:.25rem 0" id="levelname">Loading level...</h2>
-      <h3 style="margin:.25rem 0;opacity:.7" id="level-by">By:</h3>
-      <div class="hud">
-        <span id="date"></span>
-        <span>Strokes: <b id="strokes">0</b></span>
-        <span>Time: <b id="time">0.0s</b></span>
-        <input id="name" type="text" size="10" maxlength="12" placeholder="name"/>
-        <button id="reset" class="btn">Reset</button>
-        <input type="checkbox" id="mute" hidden />
-        <label for="mute" id="mute-label" class="height32">
-          <img id="mute-icon" width="32" height="32" style="background-color: white;border-radius: 8px;">
-        </label>
-        <label for="aim" id="aim-label" class="height32">
-          <img id="aim-icon" width="32" height="32" style="background-color: white;border-radius: 8px;">
-        </label>
-      </div>
-      <canvas id="g"></canvas>
-      <div class="hint">Drag to aim, release to hit. r-click to switch aim angle. Same hole for everyone today.</div>
+     <div id="main-content">
+      <div class="wrap">
+        <h1 style="margin:.25rem 0">Putt Of The Day</h1>
+        <h2 style="margin:.25rem 0" id="levelname">Loading level...</h2>
+        <h3 style="margin:.25rem 0;opacity:.7" id="level-by">By:</h3>
+        <div class="hud">
+          <span id="date"></span>
+          <span>Strokes: <b id="strokes">0</b></span>
+          <span>Time: <b id="time">0.0s</b></span>
+          <input id="name" type="text" size="10" maxlength="12" placeholder="name"/>
+          <button id="reset" class="btn">Reset</button>
+          <input type="checkbox" id="mute" hidden />
+          <label for="mute" id="mute-label" class="height32">
+            <img id="mute-icon" width="32" height="32" style="background-color: white;border-radius: 8px;">
+          </label>
+          <label for="aim" id="aim-label" class="height32">
+            <img id="aim-icon" width="32" height="32" style="background-color: white;border-radius: 8px;">
+          </label>
+        </div>
+        <canvas id="g"></canvas>
+        <div class="hint">Drag to aim, release to hit. r-click to switch aim angle. Same hole for everyone today.</div>
 
-      <div class="board">
-        <b>Today's Leaderboard</b>
-        <div id="status" class="hint" style="margin:.25rem 0 .5rem"></div>
-        <table>
-          <thead><tr><th>#</th><th>Name</th><th>Strokes</th><th>Time</th></tr></thead>
-          <tbody id="rows"></tbody>
-        </table>
+        <div class="board">
+          <b>Today's Leaderboard</b>
+          <div id="status" class="hint" style="margin:.25rem 0 .5rem"></div>
+          <table>
+            <thead><tr><th>#</th><th>Name</th><th>Strokes</th><th>Time</th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
       </div>
     </div>
+    <footer id="footer">
+      <a href="https://github.com/VilleKokkarinen/putt-of-the-day" target="_blank" rel="noopener noreferrer">
+          View on GitHub
+        </a>
+    </footer>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="https://cdn.jsdelivr.net/npm/polygon-clipping@0.15.7/dist/polygon-clipping.umd.min.js"></script>
   <script type="module">
