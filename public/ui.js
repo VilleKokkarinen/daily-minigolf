@@ -5,7 +5,7 @@ import { muteSwitch } from './game.js';
 import { getLeaderboard } from './supabase.js';
 import { FLOOR_TILE_PATTERNS, WALL_TILE_PATTERNS } from './assets.js';
 import { mouse } from './input.js';
-import { walls, floors, hole, ball, aiming, aimMode, strokes, setAimMode } from './game.js';
+import { walls, floors, colliders, hole, ball, aiming, aimMode, strokes, setAimMode } from './game.js';
 import { computePower } from './physics.js';
 
 export const canvas = document.getElementById('g');
@@ -121,6 +121,26 @@ export function draw(){
     ctx.fillRect(w.x, w.y, w.w, w.h);
   }
  
+  /* // Debug: draw collider polygons
+  for (const c of colliders) {
+    ctx.strokeStyle = 'rgba(72, 255, 246, 0.8)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+
+    for (let i = 0; i < c.v.length; i++) {
+      const x = c.v[i][0];
+      const y = c.v[i][1];
+      if (i === 0) 
+        ctx.moveTo(x, y);
+      else {
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      }
+    }
+    ctx.closePath();
+  }
+  */
+
   ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(hole.x,hole.y,HOLE_R-1,0,Math.PI*2); ctx.fill();
 

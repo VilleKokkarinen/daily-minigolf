@@ -17,7 +17,8 @@ export let previousLocation = { x: 0, y: 0 };
 export let startedAt = null;
 
 export let walls = [];
-export let floors = [];  
+export let floors = [];
+export let colliders = [];
 
 function addWall(x, y, w, h, material) {
   walls.push({ x, y, w, h, material });
@@ -25,6 +26,10 @@ function addWall(x, y, w, h, material) {
 
 function addFloor(x, y, w, h, material) {
   floors.push({ x, y, w, h, material });
+}
+
+function addCollider(v) {
+  colliders.push({ v });
 }
 
 export function muteSwitch(state) {
@@ -98,6 +103,209 @@ export function hitBall(dx, dy){
   updateStrokesText();
 }
 
+const rectangleWalls = new Set([
+  "wall", "wall_n", "wall_e", "wall_s", "wall_w",
+  "wall_sticky", "wall_bouncy"
+]);
+
+const halfWalls = new Set([
+  "wall_half_n", "wall_half_e", "wall_half_s", "wall_half_w"
+]);
+
+const quarterWalls = new Set([
+  "wall_quarter_br", "wall_quarter_bl", "wall_quarter_tl", "wall_quarter_tr"
+]);
+
+const triangleWalls = new Set([
+  "wall_triangle_br", "wall_triangle_bl", "wall_triangle_tl", "wall_triangle_tr"
+]);
+
+const halfTriangleWalls = new Set([
+  "wall_small_triangle_n", "wall_small_triangle_e", "wall_small_triangle_s", "wall_small_triangle_w"
+]);
+
+const largeCircleWalls = new Set([
+  "wall_large_circle_br", "wall_large_circle_bl", "wall_large_circle_tl", "wall_large_circle_tr"
+]);
+
+const roundedEndWalls = new Set([
+  "wall_rounded_n", "wall_rounded_e", "wall_rounded_s", "wall_rounded_w"
+]);
+
+const compatibleMaterials = new Set([
+  "wall",
+  ...halfWalls,
+  ...quarterWalls,
+  ...triangleWalls,
+]);
+
+function wallMaterialsCompatible(a, b) {
+  if (compatibleMaterials.has(a.material) && compatibleMaterials.has(b.material))
+    return true;
+  return false;
+}
+
+// --- Helper: Get vertices based on shape & orientation ---
+function getWallVertices(wall) {
+  const { x, y, w, h, material } = wall;
+  switch (material) {
+    case "wall":
+      return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+    case "wall_half_n":
+      return [[x, y + h / 2], [x + w, y + h / 2], [x + w, y + h], [x, y + h]];
+    case "wall_half_w":
+      return [[x + w / 2, y], [x + w, y], [x + w, y + h], [x + w / 2, y + h]];
+    case "wall_half_s":
+      return [[x, y], [x + w, y], [x + w, y + h / 2], [x, y + h / 2]];
+    case "wall_half_e":
+      return [[x, y], [x + w / 2, y], [x + w / 2, y + h], [x, y + h]];
+    case "wall_quarter_tl":
+      return [[x, y + h / 2], [x + w / 2, y], [x + w / 2, y + h / 2]];
+    case "wall_quarter_tr":
+      return [[x + w / 2, y], [x + w, y + h / 2], [x + w / 2, y + h / 2]];
+    case "wall_quarter_bl":
+      return [[x, y + h / 2], [x + w / 2, y + h], [x + w / 2, y + h / 2]];
+    case "wall_quarter_br":
+      return [[x + w / 2, y + h], [x + w, y + h / 2], [x + w / 2, y + h / 2]];
+    case "wall_triangle_tl":
+      return [[x, y], [x + w, y], [x, y + h]];
+    case "wall_triangle_tr":
+      return [[x + w, y], [x + w, y + h], [x, y]];
+    case "wall_triangle_bl":
+      return [[x, y + h], [x + w, y + h], [x, y]];
+    case "wall_triangle_br":
+      return [[x + w, y + h], [x + w, y], [x, y + h]];
+    default:
+      return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+  }
+}
+
+function polygonUnion(...polygons) {
+  // --- Step 1: Collect all edges from polygons ---
+  const edgeMap = new Map();
+
+  function edgeKey(a, b) {
+    return `${a.x},${a.y}-${b.x},${b.y}`;
+  }
+
+  function addEdge(a, b) {
+    const keyAB = edgeKey(a, b);
+    const keyBA = edgeKey(b, a);
+
+    // If reverse edge already exists, remove it (internal edge)
+    if (edgeMap.has(keyBA)) {
+      edgeMap.delete(keyBA);
+    } else {
+      edgeMap.set(keyAB, { start: a, end: b });
+    }
+  }
+
+  // Go through every polygon and add edges
+  for (const poly of polygons) {
+    for (let i = 0; i < poly.length; i++) {
+      const v1 = poly[i];
+      const v2 = poly[(i + 1) % poly.length];
+      addEdge(v1, v2);
+    }
+  }
+
+  // --- Step 2: Build loops from remaining edges ---
+  const loops = [];
+  const visited = new Set();
+
+  function findNextEdge(from) {
+    for (const [key, edge] of edgeMap) {
+      if (!visited.has(key) && edge.start.x === from.x && edge.start.y === from.y) {
+        return key;
+      }
+    }
+    return null;
+  }
+
+  function buildLoop(startKey) {
+    const loop = [];
+    let currentKey = startKey;
+
+    while (currentKey && !visited.has(currentKey)) {
+      visited.add(currentKey);
+
+      const edge = edgeMap.get(currentKey);
+      if (!edge) break;
+
+      loop.push(edge.start);
+
+      currentKey = findNextEdge(edge.end);
+    }
+
+    return loop;
+  }
+
+  for (const [key] of edgeMap) {
+    if (visited.has(key)) continue;
+
+    const loop = buildLoop(key);
+    if (loop.length >= 3) {
+      loops.push([loop]); // keep same format as polygon-clipping: [[outerRing], [hole1], ...]
+    }
+  }
+
+  return loops;
+}
+
+function generateWallVerts(walls) {
+  const colliders = [];
+  const visited = new Set();
+
+  function wallsTouch(a, b) {
+    const ax1 = a.x, ay1 = a.y, ax2 = a.x + a.w, ay2 = a.y + a.h;
+    const bx1 = b.x, by1 = b.y, bx2 = b.x + b.w, by2 = b.y + b.h;
+    return !(ax2 < bx1 || ax1 > bx2 || ay2 < by1 || ay1 > by2);
+  }
+
+  function dfs(idx, group) {
+    if (visited.has(idx)) return;
+    visited.add(idx);
+    group.push(walls[idx]);
+
+    for (let j = 0; j < walls.length; j++) {
+      if (!visited.has(j) && wallsTouch(walls[idx], walls[j])) {
+        dfs(j, group);
+      }
+    }
+  }
+
+  const groups = [];
+  for (let i = 0; i < walls.length; i++) {
+    if (!visited.has(i)) {
+      const group = [];
+      dfs(i, group);
+      groups.push(group);
+    }
+  }
+
+
+  for (const group of groups) {
+    let polygons = group.map(wall => [getWallVertices(wall)]);
+    const merged = window.polygonClipping.union(...polygons);
+
+    // merged may contain multiple disconnected shapes
+    merged.forEach(polygon => {
+      // polygon[0] = outer boundary
+      // polygon[1..n] = holes inside that boundary
+      polygon.forEach(ring => {
+        const verts = ring;
+        const mat = group[0].material;
+        colliders.push({ v:verts, material: mat });
+        //addCollider(verts, mat);
+      });
+    });
+  }
+
+  console.log(colliders);
+
+  return colliders;
+}
+
 export function initializeGame(s, h, f, w){
   spawn = s;
   hole = h;
@@ -123,6 +331,16 @@ export function initializeGame(s, h, f, w){
   w.forEach(o => {
     addWall(o.x, o.y, o.w, o.h, o.material);
   });
+
+  var compatibleWalls = [];
+  for (let i = 0; i < walls.length; i++) {
+    var wall = walls[i];
+    if(compatibleMaterials.has(wall.material)) {
+      compatibleWalls.push(wall);    
+    }
+  }
+
+  colliders = generateWallVerts(compatibleWalls);
 }
 
 
@@ -646,34 +864,6 @@ function collideRoundedEndTile(ball, wall, orientation, newX, newY) {
   return collideCircleTile(ball, circle, newX, newY);  
 }
 
-const rectangleWalls = new Set([
-  "wall", "wall_n", "wall_e", "wall_s", "wall_w",
-  "wall_sticky", "wall_bouncy"
-]);
-
-const halfWalls = new Set([
-  "wall_half_n", "wall_half_e", "wall_half_s", "wall_half_w"
-]);
-
-const quarterWalls = new Set([
-  "wall_quarter_br", "wall_quarter_bl", "wall_quarter_tl", "wall_quarter_tr"
-]);
-
-const triangleWalls = new Set([
-  "wall_triangle_br", "wall_triangle_bl", "wall_triangle_tl", "wall_triangle_tr"
-]);
-
-const halfTriangleWalls = new Set([
-  "wall_small_triangle_n", "wall_small_triangle_e", "wall_small_triangle_s", "wall_small_triangle_w"
-]);
-
-const largeCircleWalls = new Set([
-  "wall_large_circle_br", "wall_large_circle_bl", "wall_large_circle_tl", "wall_large_circle_tr"
-]);
-
-const roundedEndWalls = new Set([
-  "wall_rounded_n", "wall_rounded_e", "wall_rounded_s", "wall_rounded_w"
-]);
 
 function moveBallStep(ball, dt, walls) {
   let newX = ball.x + ball.vx * dt;
@@ -681,9 +871,47 @@ function moveBallStep(ball, dt, walls) {
 
   let collisions = [];
 
-   for (let wall of walls) {
+  for(let collider of colliders) {
+    const verts = collider.v;
+    let vx = ball.vx;
+    let vy = ball.vy;
 
+    let collision = false;
+
+    const coordinatedVerts = verts.map(v => ({ x: v[0], y: v[1] }));
+
+    const closest = closestPointOnPolygon(newX, newY, coordinatedVerts);
+    if(closest == null) continue;
+    const dx = newX - closest.x;
+    const dy = newY - closest.y;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist < BALL_R) {
+      const overlap = BALL_R - dist;
+      const nx = dx / dist;
+      const ny = dy / dist;
+
+      newX += nx * overlap;
+      newY += ny * overlap;
+
+      const newVel = reflect(vx, vy, nx, ny);
+      vx = newVel.vx;
+      vy = newVel.vy;
+      collision = true;
+      console.log('polygon collision');
+    }
+
+    if(collision === true) {
+      collisions.push({ newX, newY, vx, vy, collision, wall: { x: 0, y: 0, w: 0, h: 0, material: collider.material } });
+    }
+  }
+
+  for (let wall of walls) {
     const mat = wall.material;
+
+    if(compatibleMaterials.has(mat)) {
+      continue; // already handled by polygon colliders
+    }
     
     if(rectangleWalls.has(mat)) {
       const res = collideRectTile(ball, wall, newX, newY);
