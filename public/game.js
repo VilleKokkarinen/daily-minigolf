@@ -300,9 +300,6 @@ function generateWallVerts(walls) {
       });
     });
   }
-
-  console.log(colliders);
-
   return colliders;
 }
 

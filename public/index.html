@@ -8,7 +8,15 @@
   <style>
     html,body{margin:0;height:100%;background:#0b0f12;color:#e7ecef;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
     .wrap{display:flex;flex-direction:column;align-items:center;gap:.5rem;padding:1rem}
-    canvas{background:#0a3a1a;border:2px solid #0e2213;border-radius:12px;touch-action:none}
+    canvas {
+      background: #0a3a1a;
+      border: 2px solid #0e2213;
+      border-radius: 12px;
+      touch-action: none;
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
     .hud{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;justify-content:center}
     .btn, input[type=text]{appearance:none;border:1px solid #2a2f33;background:#13181c;color:#e7ecef;border-radius:10px;padding:.5rem .75rem}
     .btn{cursor:pointer}
@@ -56,9 +64,54 @@
   <script type="module">
     import { TILE_SIZE, GRID_W, GRID_H } from './config.js';
 
+    const logicalWidth = TILE_SIZE * GRID_W;
+    const logicalHeight = TILE_SIZE * GRID_H;
+
     const canvas = document.getElementById('g');
-    canvas.width = TILE_SIZE * GRID_W;
-    canvas.height = TILE_SIZE * GRID_H;
+
+    canvas.width = logicalWidth;
+    canvas.height = logicalHeight;
+
+    // Dynamically scale canvas to fit screen width
+    function resizeCanvas() {
+      const scale = Math.min(
+        window.innerWidth / logicalWidth,
+        window.innerHeight / logicalHeight,
+        1 // never scale above original size
+      );
+
+      const width = logicalWidth * scale;
+      const height = logicalHeight * scale;
+
+      canvas.style.width = width + "px";
+      canvas.style.height = height + "px";
+
+      // Optionally center canvas horizontally
+      canvas.style.display = "block";
+      canvas.style.margin = "0 auto";
+    }
+
+    function scrollToCanvas() {
+      const canvasRect = canvas.getBoundingClientRect();
+      const scrollY = window.scrollY + canvasRect.top - (window.innerHeight - canvasRect.height) / 2;
+      window.scrollTo({ top: scrollY, behavior: "smooth" });
+    }
+
+    function handleMobileOrientation() {
+      window.setTimeout(() => {
+        resizeCanvas();
+        if (window.innerWidth > window.innerHeight) {
+          // Landscape mode
+          console.log("Landscape mode");
+          scrollToCanvas();
+        }
+      }, 10);     
+    }
+
+    // Resize on load and when device rotates/resizes
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+    window.addEventListener("orientationchange", handleMobileOrientation);
   </script>
   <script type="module" src="./main.js"></script>
 
